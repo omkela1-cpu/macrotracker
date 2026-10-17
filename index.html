@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacroTracker</title>
+<style>
+  :root { --bg: #f2f2f7; --card: #fff; --text: #111; --muted: #6b6b70; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989f; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+         background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+  main { width: 100%; max-width: 380px; background: var(--card); border-radius: 20px; padding: 28px 24px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  p { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <!-- Supabase sends people here after they tap the link in a confirmation email. -->
+  <h1 id="title">MacroTracker</h1>
+  <p id="text">Log what you eat and keep an eye on your macros.</p>
+</main>
+<script>
+  const hash = new URLSearchParams(location.hash.slice(1))
+  const query = new URLSearchParams(location.search)
+  if (hash.get('error') || query.get('error')) {
+    document.getElementById('title').textContent = "That link didn't work"
+    document.getElementById('text').textContent =
+      (hash.get('error_description') || query.get('error_description') || 'It may have expired.') +
+      ' Try signing in to the app, or make the account again.'
+  } else if (hash.get('type') === 'signup' || hash.get('access_token') || query.get('code')) {
+    document.getElementById('title').textContent = 'Email confirmed'
+    document.getElementById('text').textContent = 'You can go back to the app and sign in.'
+  }
+</script>
+</body>
+</html>
