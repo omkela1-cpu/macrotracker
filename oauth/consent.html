@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect to MacroTracker</title>
+<style>
+  :root { --bg: #f2f2f7; --card: #fff; --text: #111; --muted: #6b6b70; --green: #2e9e5b; --red: #d33; --field: #f2f2f7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --card: #1c1c1e; --text: #f2f2f7; --muted: #98989f; --field: #2c2c2e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+         background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+  main { width: 100%; max-width: 380px; background: var(--card); border-radius: 20px; padding: 28px 24px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  p { margin: 0 0 18px; color: var(--muted); }
+  input { width: 100%; padding: 14px; margin: 0 0 10px; border: 0; border-radius: 12px;
+          background: var(--field); color: var(--text); font: inherit; }
+  button { width: 100%; padding: 14px; border: 0; border-radius: 14px; font: inherit; font-weight: 600;
+           background: var(--green); color: #fff; cursor: pointer; }
+  button.secondary { background: var(--field); color: var(--text); margin-top: 10px; }
+  button:disabled { opacity: 0.5; }
+  .error { color: var(--red); font-size: 14px; margin-top: 12px; }
+  .small { font-size: 14px; }
+  .small a { color: var(--green); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="loading"><p>Loading…</p></section>
+
+  <form id="signin" hidden>
+    <h1>Sign in to MacroTracker</h1>
+    <p>Use the same email and password as the app.</p>
+    <input id="email" type="email" autocomplete="username" placeholder="Email" required>
+    <input id="password" type="password" autocomplete="current-password" placeholder="Password" required>
+    <button id="signin-button" type="submit">Sign in</button>
+  </form>
+
+  <section id="consent" hidden>
+    <h1>Allow <span id="client-name">this app</span>?</h1>
+    <p>It will be able to read your food diary and goals, log food, fix entries and change your goals.</p>
+    <p class="small">Signed in as <strong id="user-email"></strong>. <a href="#" id="switch">Not you?</a></p>
+    <button id="allow">Allow</button>
+    <button id="deny" class="secondary">Don't allow</button>
+  </section>
+
+  <section id="done" hidden>
+    <h1>All done</h1>
+    <p id="done-text">You can close this page.</p>
+  </section>
+
+  <div id="error" class="error" hidden></div>
+</main>
+
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/+esm'
+
+  // The publishable key is safe to show: row level security limits it to each person's own rows.
+  const supabase = createClient(
+    'https://ccavjmseumsvelrsjnjw.supabase.co',
+    'sb_publishable_5WdxjMO4-NHFvsimNgOP2A_uow1ZpPy'
+  )
+
+  const authorizationId = new URLSearchParams(location.search).get('authorization_id')
+  const $ = (id) => document.getElementById(id)
+  const show = (id) => {
+    for (const s of ['loading', 'signin', 'consent', 'done']) $(s).hidden = s !== id
+  }
+  const fail = (message) => { $('error').textContent = message; $('error').hidden = false }
+  const clearError = () => { $('error').hidden = true }
+
+  async function start() {
+    if (!authorizationId) {
+      show('done')
+      $('done-text').textContent = 'Nothing to do here. Add MacroTracker as a connector in Claude to get started.'
+      return
+    }
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { show('signin'); return }
+    await loadDetails()
+  }
+
+  async function loadDetails() {
+    show('loading')
+    const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(authorizationId)
+    if (error) { show('signin'); fail(error.message); return }
+    // Already allowed before: go straight back.
+    if (!('authorization_id' in data)) { location.href = data.redirect_url; return }
+    $('client-name').textContent = data.client?.name || 'this app'
+    $('user-email').textContent = data.user?.email || ''
+    show('consent')
+  }
+
+  async function decide(allow) {
+    clearError()
+    $('allow').disabled = $('deny').disabled = true
+    const options = { skipBrowserRedirect: true }
+    const { data, error } = allow
+      ? await supabase.auth.oauth.approveAuthorization(authorizationId, options)
+      : await supabase.auth.oauth.denyAuthorization(authorizationId, options)
+    if (error) {
+      $('allow').disabled = $('deny').disabled = false
+      fail(error.message)
+      return
+    }
+    show('done')
+    $('done-text').textContent = allow ? 'Connected. Taking you back…' : 'Not connected. Taking you back…'
+    location.href = data.redirect_url
+  }
+
+  $('signin').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    clearError()
+    $('signin-button').disabled = true
+    const { error } = await supabase.auth.signInWithPassword({
+      email: $('email').value.trim().toLowerCase(),
+      password: $('password').value,
+    })
+    $('signin-button').disabled = false
+    if (error) {
+      fail(error.code === 'invalid_credentials' ? "That email and password don't match." : error.message)
+      return
+    }
+    await loadDetails()
+  })
+
+  $('allow').addEventListener('click', () => decide(true))
+  $('deny').addEventListener('click', () => decide(false))
+  $('switch').addEventListener('click', async (event) => {
+    event.preventDefault()
+    await supabase.auth.signOut()
+    show('signin')
+  })
+
+  start().catch((e) => { show('signin'); fail(e.message) })
+</script>
+</body>
+</html>
